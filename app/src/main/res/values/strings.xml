@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">GuardDroid</string>
+
+    <!-- Notification channels -->
+    <string name="channel_threats_name">Malware alerts</string>
+    <string name="channel_threats_desc">Urgent alerts when a scanned app looks malicious.</string>
+    <string name="channel_status_name">Scan status</string>
+    <string name="channel_status_desc">Background scan progress and summaries.</string>
+
+    <!-- Threat notification -->
+    <string name="alert_title">Potential malware detected</string>
+    <string name="alert_text">%1$s scored %2$d%% malicious. Tap to review.</string>
+    <string name="alert_big_text">GuardDroid flagged \"%1$s\" with a %2$d%% malicious probability based on %3$d high-risk permissions. Review the app and consider uninstalling it.</string>
+</resources>
