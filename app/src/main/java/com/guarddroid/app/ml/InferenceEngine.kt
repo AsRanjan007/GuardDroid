@@ -4,9 +4,8 @@ import android.content.Context
 import android.util.Log
 import org.tensorflow.lite.Interpreter
 import java.io.Closeable
-import java.io.FileInputStream
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Loads the bundled NaticusDroid TensorFlow Lite classifier from `assets/` and
@@ -60,23 +59,28 @@ class InferenceEngine private constructor(
          * unavailable" rather than crashing the scan pipeline.
          */
         fun create(context: Context): InferenceEngine {
-            val model = loadModelFile(context, PermissionSchema.MODEL_ASSET)
+            val model = loadModelBuffer(context, PermissionSchema.MODEL_ASSET)
             val options = Interpreter.Options().apply { numThreads = 2 }
             val interpreter = Interpreter(model, options)
             Log.i(TAG, "Loaded ${PermissionSchema.MODEL_ASSET} (${model.capacity()} bytes)")
             return InferenceEngine(interpreter)
         }
 
-        private fun loadModelFile(context: Context, assetName: String): MappedByteBuffer {
-            context.assets.openFd(assetName).use { fd ->
-                FileInputStream(fd.fileDescriptor).use { stream ->
-                    return stream.channel.map(
-                        FileChannel.MapMode.READ_ONLY,
-                        fd.startOffset,
-                        fd.declaredLength,
-                    )
+        /**
+         * Reads the model asset into a direct [ByteBuffer]. Unlike memory-mapping
+         * via `openFd`, this works whether or not the `.tflite` asset was stored
+         * compressed in the APK, so it can never fail with
+         * "this file can not be opened as a file descriptor; it is probably
+         * compressed".
+         */
+        private fun loadModelBuffer(context: Context, assetName: String): ByteBuffer {
+            val bytes = context.assets.open(assetName).use { it.readBytes() }
+            return ByteBuffer.allocateDirect(bytes.size)
+                .order(ByteOrder.nativeOrder())
+                .apply {
+                    put(bytes)
+                    rewind()
                 }
-            }
         }
     }
 }

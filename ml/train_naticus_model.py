@@ -209,7 +209,11 @@ def build_model():
 
 def export_tflite(model):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    # Emit a plain float32 model using only the built-in TFLite op set
+    # (FULLY_CONNECTED / RELU / LOGISTIC). We deliberately skip post-training
+    # quantization so the model loads on the widest range of on-device TFLite
+    # runtimes without needing extra delegates.
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
     tflite_model = converter.convert()
     os.makedirs(ASSETS_DIR, exist_ok=True)
     with open(TFLITE_PATH, "wb") as fh:
