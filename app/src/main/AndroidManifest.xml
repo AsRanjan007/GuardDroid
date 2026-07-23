@@ -14,6 +14,14 @@
     <!-- Keep periodic WorkManager scans running reliably. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Launch the loud full-screen malware alert from the background. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Backing service for expedited install-time scans. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:name=".GuardDroidApp"
         android:allowBackup="true"
@@ -42,6 +50,17 @@
                 <data android:scheme="guarddroid" android:host="app" />
             </intent-filter>
         </activity>
+
+        <!-- Full-screen malware alarm shown over the lock screen from the background. -->
+        <activity
+            android:name=".alert.ThreatAlertActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity=".alert"
+            android:theme="@style/Theme.GuardDroid"
+            android:turnScreenOn="true" />
 
         <!-- Detects newly installed / updated third-party apps. -->
         <receiver

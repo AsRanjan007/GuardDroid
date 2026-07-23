@@ -11,4 +11,14 @@
     <string name="alert_title">Potential malware detected</string>
     <string name="alert_text">%1$s scored %2$d%% malicious. Tap to review.</string>
     <string name="alert_big_text">GuardDroid flagged \"%1$s\" with a %2$d%% malicious probability based on %3$d high-risk permissions. Review the app and consider uninstalling it.</string>
+
+    <!-- Newly installed app scan notification -->
+    <string name="install_scan_title">New app scanned</string>
+    <string name="install_scan_text">%1$s — %2$d%% malicious (%3$s)</string>
+
+    <!-- Scan summary + progress -->
+    <string name="scanning_title">GuardDroid is scanning…</string>
+    <string name="summary_title">Scan complete</string>
+    <string name="summary_text_risky">Scanned %1$d apps — %2$d flagged high risk.</string>
+    <string name="summary_text_clean">Scanned %1$d apps — no high-risk apps found.</string>
 </resources>

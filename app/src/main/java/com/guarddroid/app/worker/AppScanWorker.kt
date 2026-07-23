@@ -1,16 +1,23 @@
 package com.guarddroid.app.worker
 
+import android.app.Notification
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.guarddroid.app.R
 import com.guarddroid.app.data.AppScanResult
 import com.guarddroid.app.data.ScanRepository
 import com.guarddroid.app.ml.AppScanner
@@ -54,18 +61,42 @@ class AppScanWorker(
         }
     }
 
+    /**
+     * Required for expedited work: on Android versions that back expedited jobs
+     * with a foreground service, WorkManager shows this quiet notification.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val notification: Notification = NotificationCompat.Builder(applicationContext, NotificationHelper.CHANNEL_STATUS)
+            .setSmallIcon(R.drawable.ic_shield_alert)
+            .setContentTitle(applicationContext.getString(R.string.scanning_title))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(SCAN_FGS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(SCAN_FGS_ID, notification)
+        }
+    }
+
     private fun scanAll() {
         val results = AppScanner.scanAllApps(applicationContext)
         ScanRepository.replaceAll(applicationContext, results)
+        // Quieter alerts for a full sweep (no full-screen barrage), deduplicated.
         results.filter { it.isHighRisk }.forEach { maybeAlert(it) }
-        Log.i(TAG, "Full scan complete: ${results.size} apps, ${results.count { it.isHighRisk }} high-risk")
+        val highRisk = results.count { it.isHighRisk }
+        NotificationHelper.showScanSummary(applicationContext, results.size, highRisk)
+        Log.i(TAG, "Full scan complete: ${results.size} apps, $highRisk high-risk")
     }
 
     private fun scanSingle(packageName: String) {
         val result = AppScanner.scanSingleApp(applicationContext, packageName) ?: return
         ScanRepository.upsert(applicationContext, result)
-        if (result.isHighRisk) maybeAlert(result)
-        Log.i(TAG, "Scanned $packageName -> ${result.riskScorePercent}% malicious")
+        // Newly installed app: loud full-screen alarm if high-risk, else an info card.
+        NotificationHelper.notifyInstalledAppScanned(applicationContext, result)
+        // Remember the alert signature so a later full scan won't re-alarm identically.
+        alertPrefs(applicationContext).edit().putString(result.packageName, result.riskLevel.name).apply()
+        Log.i(TAG, "Scanned $packageName -> ${result.riskScorePercent}% malicious (${result.riskLevel})")
     }
 
     /** Alerts once per (package, risk-bucket) so periodic scans don't spam. */
@@ -75,7 +106,7 @@ class AppScanWorker(
         val previous = prefs.getString(key, null)
         val signature = result.riskLevel.name
         if (previous == signature) return
-        NotificationHelper.showThreatAlert(applicationContext, result)
+        NotificationHelper.showThreatAlert(applicationContext, result, fullScreen = false)
         prefs.edit().putString(key, signature).apply()
     }
 
@@ -86,6 +117,7 @@ class AppScanWorker(
         private const val UNIQUE_PERIODIC = "guarddroid_periodic_scan"
         private const val UNIQUE_MANUAL = "guarddroid_manual_scan"
         private const val ALERT_PREFS = "guarddroid_alert_dedupe"
+        private const val SCAN_FGS_ID = 909091
 
         private fun alertPrefs(context: Context): SharedPreferences =
             context.getSharedPreferences(ALERT_PREFS, Context.MODE_PRIVATE)
@@ -111,10 +143,15 @@ class AppScanWorker(
             )
         }
 
-        /** Triggers a scan of a single package (used on install / replace). */
+        /**
+         * Triggers a scan of a single package (used on install / replace).
+         * Expedited so the alert fires as soon as possible after installation,
+         * even while GuardDroid is in the background.
+         */
         fun enqueueSingleScan(context: Context, packageName: String) {
             val request = OneTimeWorkRequestBuilder<AppScanWorker>()
                 .setInputData(workDataOf(KEY_PACKAGE to packageName))
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "guarddroid_scan_$packageName",

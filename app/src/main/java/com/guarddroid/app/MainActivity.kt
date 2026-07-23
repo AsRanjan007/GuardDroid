@@ -88,6 +88,19 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_PACKAGE = "com.guarddroid.app.extra.PACKAGE"
 
+        /** Opens the dashboard (used by the scan-summary notification). */
+        fun launchPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            return PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+
         /** Deep-links a notification tap to the scan-detail screen for [packageName]. */
         fun detailPendingIntent(context: Context, packageName: String): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
