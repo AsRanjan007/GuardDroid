@@ -157,21 +157,43 @@ NUM_FEATURES = len(PERMISSIONS)
 RISK_THRESHOLD = 0.70  # >70% malicious probability -> urgent alert (matches app)
 
 
-def synthesize_dataset(n_per_class=8000):
-    """Generate a realistic binary permission matrix + labels."""
+# Steepness / midpoint of the logistic that turns a permission-risk sum into a
+# malicious probability when synthesising labels. Chosen so that a normal app
+# (a couple of low-risk permissions) stays well below 0.5 while any cluster of
+# genuinely dangerous permissions (SMS, telephony, device-admin, overlay,
+# accessibility, silent install, location+audio+contacts, …) crosses 0.70.
+_RISK_STEEPNESS = 3.0
+_RISK_MIDPOINT = 1.6
+
+
+def _permission_weights():
+    """Per-permission malware-indicativeness = P(mal) - P(benign)."""
     p_benign = np.array([p[1] for p in PERMISSIONS])
     p_malicious = np.array([p[2] for p in PERMISSIONS])
+    return (p_malicious - p_benign).astype(np.float32)
 
-    benign = (np.random.rand(n_per_class, NUM_FEATURES) < p_benign).astype(np.float32)
-    malic = (np.random.rand(n_per_class, NUM_FEATURES) < p_malicious).astype(np.float32)
 
-    x = np.vstack([benign, malic])
-    y = np.concatenate([
-        np.zeros(n_per_class, dtype=np.float32),
-        np.ones(n_per_class, dtype=np.float32),
-    ])
+def synthesize_dataset(n_samples=40000):
+    """
+    Generate a diverse binary permission matrix with labels drawn from a
+    *monotonic* risk model, so the trained classifier responds to the presence
+    of dangerous permissions regardless of which cluster they belong to (and
+    does not simply memorise the single strongest cluster).
+    """
+    weights = _permission_weights()
 
-    idx = np.random.permutation(len(x))
+    # Each app gets a random permission density so the dataset spans sparse
+    # (few permissions) to dense (many permissions) apps.
+    densities = np.random.uniform(0.05, 0.5, size=(n_samples, 1))
+    x = (np.random.rand(n_samples, NUM_FEATURES) < densities).astype(np.float32)
+    # INTERNET is nearly universal in both classes.
+    x[:, 0] = (np.random.rand(n_samples) < 0.95).astype(np.float32)
+
+    risk = x @ weights
+    p_mal = 1.0 / (1.0 + np.exp(-_RISK_STEEPNESS * (risk - _RISK_MIDPOINT)))
+    y = (np.random.rand(n_samples) < p_mal).astype(np.float32)
+
+    idx = np.random.permutation(n_samples)
     return x[idx], y[idx]
 
 
@@ -192,15 +214,19 @@ def load_csv_dataset(csv_path):
 
 
 def build_model():
+    # A logistic-regression classifier (single sigmoid unit) keeps the mapping
+    # from permissions to risk monotonic and interpretable: every dangerous
+    # permission can only ever *increase* the malicious probability, so a
+    # spyware/dropper/banking-overlay profile is flagged on the strength of its
+    # own permission cluster rather than being ignored in favour of one cluster
+    # the model happened to over-fit. It also compiles to just FULLY_CONNECTED +
+    # LOGISTIC for maximum on-device runtime compatibility.
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(NUM_FEATURES,), name="permission_vector"),
-        tf.keras.layers.Dense(32, activation="relu"),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(16, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid", name="malicious_probability"),
     ])
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(1e-3),
+        optimizer=tf.keras.optimizers.Adam(5e-3),
         loss="binary_crossentropy",
         metrics=["accuracy"],
     )

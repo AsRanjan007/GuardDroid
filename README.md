@@ -41,18 +41,25 @@ PackageManager ──▶ PermissionExtractor ──▶ [1×86] vector ──▶ 
 | | [`AppScanner`](app/src/main/java/com/guarddroid/app/ml/AppScanner.kt) | Orchestrates enumerate → extract → infer for one or all apps. |
 | **State** | [`ScanRepository`](app/src/main/java/com/guarddroid/app/data/ScanRepository.kt) | Single source of truth; `StateFlow` + `SharedPreferences` persistence. |
 | **Alerts** | [`NotificationHelper`](app/src/main/java/com/guarddroid/app/notification/NotificationHelper.kt) | Notification channels + urgent threat alerts that deep-link to details. |
+| | [`ThreatAlertActivity`](app/src/main/java/com/guarddroid/app/alert/ThreatAlertActivity.kt) | Full-screen malware alarm (over the lock screen, alarm tone + vibration) launched from the background when a newly installed app is high-risk. |
 | **UI** | [`DashboardScreen`](app/src/main/java/com/guarddroid/app/ui/DashboardScreen.kt) / [`ScanDetailScreen`](app/src/main/java/com/guarddroid/app/ui/ScanDetailScreen.kt) | Compose Material 3 dashboard (status, stats, app list, Scan Now) and per-app detail with contributing permissions. |
 
 ## The machine-learning model
 
-The bundled model (`app/src/main/assets/naticus_droid_permission_model.tflite`,
-~7 KB) is a small dense network:
+The bundled model (`app/src/main/assets/naticus_droid_permission_model.tflite`)
+is a **logistic-regression** classifier over the 86 permission flags:
 
 ```
 Input [1×86] (binary permission flags)
-  → Dense(32, relu) → Dropout(0.2) → Dense(16, relu)
   → Dense(1, sigmoid) → malicious probability [1×1]
 ```
+
+A logistic model keeps the mapping **monotonic** — every dangerous permission
+can only *increase* the score — so an app is flagged on the strength of its own
+permission cluster (SMS abuse, device-admin, overlays, accessibility hijacking,
+silent install, location+audio+contacts surveillance …) rather than the model
+over-fitting a single cluster. It compiles to just `FULLY_CONNECTED` + `LOGISTIC`
+for maximum on-device runtime compatibility.
 
 It is produced by [`ml/train_naticus_model.py`](ml/train_naticus_model.py),
 which also **auto-generates `PermissionSchema.kt`** so the on-device feature
@@ -81,7 +88,15 @@ python3 ml/train_naticus_model.py --csv path/to/NATICUSdroid.csv
 |------------|-----|
 | `QUERY_ALL_PACKAGES` | Enumerate installed third-party apps to scan them. |
 | `POST_NOTIFICATIONS` | Show urgent malware alerts (runtime-requested on Android 13+). |
+| `USE_FULL_SCREEN_INTENT` | Raise the over-the-lock-screen malware alarm from the background. |
+| `VIBRATE` | Vibrate during a high-risk alert. |
 | `RECEIVE_BOOT_COMPLETED` | Keep periodic background scans reliable across reboots. |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` | Back the expedited install-time scan. |
+
+> **Note on Android 14+:** apps that aren't phone/alarm apps may have
+> `USE_FULL_SCREEN_INTENT` withheld by default, in which case the alarm shows as
+> a heads-up notification (still with sound). To get the full over-the-lock-screen
+> popup, enable *Settings → Apps → GuardDroid → Full-screen intents*.
 
 ## Building
 
@@ -113,8 +128,25 @@ GuardDroid/
 │  │  │  ├─ GuardDroidApp.kt, MainActivity.kt
 │  │  └─ res/          adaptive launcher icon (from the GuardDroid logo), themes
 │  └─ src/test/        PermissionMappingTest
-└─ ml/train_naticus_model.py   # trains the .tflite + generates PermissionSchema.kt
+├─ ml/train_naticus_model.py   # trains the .tflite + generates PermissionSchema.kt
+└─ sample-test-apps/           # 10 benign permission-profile test apps (see its README)
 ```
+
+## Testing with the sample apps
+
+The [`sample-test-apps/`](sample-test-apps/README.md) folder contains ten tiny
+**benign** apps, each declaring a different malware-archetype permission profile
+(SMS trojan, spyware, banking overlay, ransomware, premium dialer, adware,
+device-admin bot, stalkerware, dropper) plus one genuinely benign flashlight app
+as a false-positive control. Build all ten with:
+
+```bash
+./gradlew -p sample-test-apps :app:assembleDebug
+```
+
+Install a high-risk one to see the background install alarm, or install several
+and tap **Scan Now** — the nine malicious profiles are flagged High and the
+flashlight control stays Safe. See the folder's README for details.
 
 ## Disclaimer
 
